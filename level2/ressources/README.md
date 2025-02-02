@@ -95,7 +95,7 @@ It performs a check on the return address `ebp + 0x4` !  Basically, it checks if
 
 It echoes back when we just wrote into the buffer, and then proceed to duplicate the stack-allocated buffer into an heap-allocated region. Interesting ! So instead of modifying our return address so it points on our buffer that is allocated into the stack, we could modify it so it points into the heap-allocated region instead ! It will contains exactly the same data as it is duplicated.
 
-The challange here is that our shell code must not include any NUL byte (`0x00`), since it will end prematurely `strdup` (remember that a C strings are always nul-terminated).
+The challenge here is that our shell code must not include any NUL byte (`0x00`), since it will end prematurely `strdup` (remember that a C strings are always nul-terminated).
 
 ## Crafting the shellcode
 
