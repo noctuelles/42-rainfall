@@ -43,7 +43,7 @@ This is much simpler : two empty string are equals.
 If an empty string is passed to `atoi`, it returns 0, thus leading to `buffer` being an empty string. It would mean that `argv[1]` is also an empty string. So the `strcmp` check will pass ! 
 
 ```
-bonus3@RainFall:~$ ./bonus3 "$(printf '\x00')"
+bonus3@RainFall:~$ ./bonus3 "$(python -c 'print("\x00")')"
 $ whoami
 end
 $ cd ../end
