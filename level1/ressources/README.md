@@ -2,7 +2,7 @@
 
 In this level, we are greeted with a 32-bit ELF *static* executable binary with symbols not stripped.
 
-Static analysis using `objdump` reveals that there is a strange `run` function :
+Static analysis using `objdump` reveals that there is a `run` function :
 
 ```text
 08048444 <run>:
@@ -25,7 +25,7 @@ Static analysis using `objdump` reveals that there is a strange `run` function :
  804847f:	c3                   	ret    
 ```
 
-This function gives us access to the shell. The address `0x8048584` is pointing to a read-only string `/bin/sh`. We somehow needs to execute this function.
+This function gives us access to a shell. The address `0x8048584` is pointing to a read-only string `/bin/sh`. We somehow needs to execute this function to retrieve the flag !
 
 The `main` function is just a really simple program :
 
@@ -42,19 +42,21 @@ The `main` function is just a really simple program :
  8048496:	c3                   	ret    
 ```
 
-First, it aligns the stack on a 16 byte boundary, and allocates `0x50` bytes, probably a buffer. It makes a call to `gets`, which is an especially unsafe C library function that is prone to **buffer overflow**, since it does not do any bounds checking on the buffer.
+First, the stack is aligned to a 16-byte boundary, and **0x50** bytes are allocated, likely as a buffer. The program then calls gets, an inherently unsafe C library function prone to **buffer overflow**, as it does not perform *bounds checking* on the buffer.
 
-Given the fact that we have to find a way to execute the `run` function, we could overwrite the return address of the  `main` function to point to the `run ` function using a **buffer overflow**.
+To execute the run function, we can exploit this buffer overflow to overwrite the return address of the main function, redirecting execution to run.
 
-In a C program linked with the C Standard Library, `main` is **not** the entry point of an executable. In short, it is called by the C library initialization routine : this is why we overwrite the return address that has been pushed to the stack.
+In a C program linked with the C Standard Library, main is not the actual **entry point**. Instead, it is invoked by the C library’s initialization routine. This is why we target the return address pushed onto the stack (commonly called **saved eip**).
 
-First thing to do is to fill the buffer entirely until we hit a segfault : we will know that we have reach the return address location.
+The first step is to fill the buffer completely until we trigger a segmentation fault—this will confirm that we have reached the return address location.
 
 ```bash
 python -c 'print("a"*76)' | ./level1
 ```
 
-By trial and error, we start to get `Segmentation Fault` when going over 76 characters (eq. 76 bytes), this means we have touched the return address stored in the stack. Now we have to feed it the entry point of the `run` function, which is `0x08048444`. We are on a **little-endian** architecture, so we need to send the input in **reverse** (*least significant byte first*) :
+Through trial and error, we observe a *Segmentation Fault* when exceeding 76 characters (i.e., 76 bytes). This confirms that we have reached and overwritten the return address stored on the stack.
+
+Next, we need to replace this return address with the entry point of the `run` function, which is located at `0x08048444`. Since we are operating on a little-endian architecture (**x86**), we must provide the address in reverse byte order (*least significant byte first).
 
 ```bash
 python -c 'print("a"*76 + "\x44\x84\x04\x08")' | ./level1
@@ -67,10 +69,13 @@ Good... Wait what?
 Segmentation Fault
 ```
 
-Ok. So it seems we intended our goal : reaching the `run` function. But it segfault ! We do not have access to the shell ! The reason is simple : we used a pipe to inject our payload which immediately close the standard input of the `level1` program. When `system` launch `sh`, the standard input is closed and then **exit immediately**.
-Since we manually modified the stack, the `ret` instruction is setting `eip` to `0x00000000`, and segfault.
+It seems we have achieved our goal—reaching the run function. However, the program segfaults, and we do not get a shell !
 
-The trick is to left open the standard input by using a second command in the chain : `cat`.
+The reason is simple: we injected our payload using a pipe, which immediately closes the standard input of the level1 program. When `system` executes sh, the closed standard input causes the shell to exit immediately.
+
+Additionally, since we manually modified the stack, the ret instruction sets `eip` to `0x00000000`, leading to a segmentation fault (for the curious, this is probably the **saved ebp** pushed by main in the function prologue).
+
+The solution is to keep the standard input open by chaining a second command, such as cat.
 
 ```bash
 level1@RainFall:~$ (python -c 'print("a"*76 + "\x44\x84\x04\x08")'; cat) | ./level1
@@ -88,6 +93,7 @@ dr-x--x--x  1 root   root    340 Sep 23  2015 ..
 -rw-r--r--+ 1 level2 level2   65 Sep 23  2015 .pass
 -rw-r--r--  1 level2 level2  675 Apr  3  2012 .profile
 cat .pass
+53a4a712787f40ec66c3c26c1f4b164dcad5552b038bb0addd69bf5bf6fa8e77
 ```
 
 Success !
