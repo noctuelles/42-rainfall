@@ -5,7 +5,7 @@ static int m = 0;
 static int v()
 {
   int result;
-  char s[520];
+  char s[512];
 
   fgets(s, 512, stdin);
   printf(s);
