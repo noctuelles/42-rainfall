@@ -6,11 +6,11 @@
 int language = 0;
 
 const char *NL = "Hyvää päivää ";
-const char *FL = "";
-const char *DFT = "";
+const char *FL = "Goedemiddag! ";
+const char *DFT = "Hello ";
 
 
-void greeuser(char *ptr)
+void greetuser(char *ptr)
 {
     char buffer[20];
 
@@ -25,8 +25,8 @@ void greeuser(char *ptr)
             strcpy(buffer, DFT);
             break;
     }
-    strcat(ptr, buffer);
-    puts(ptr);
+    strcat(buffer, ptr);
+    puts(buffer);
 }
 
 int main(int argc, char **argv)
