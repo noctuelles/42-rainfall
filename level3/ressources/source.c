@@ -10,7 +10,7 @@ static int v()
   fgets(s, 512, stdin);
   printf(s);
   result = m;
-  if ( m == 64 )
+  if (m == 64)
   {
     fwrite("Wait what?!\n", 1u, 0xCu, stdout);
     return system("/bin/sh");
